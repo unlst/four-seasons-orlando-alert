@@ -1,13 +1,16 @@
+from flask import Flask
+import threading
 import requests
 import time
+import os
+
+app = Flask(__name__)
 
 # CONFIG
 CHECK_INTERVAL = 600  # 10 minutes
 NTFY_TOPIC = "fs-orlando-jobs"
 seen_jobs = set()
-
 WORKDAY_API = "https://fourseasons.wd3.myworkdayjobs.com/wday/cxs/fourseasons/Search/jobs"
-
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     "Accept": "application/json",
@@ -16,12 +19,9 @@ HEADERS = {
 
 def get_jobs():
     payload = {
-        "appliedFacets": {
-            "locationRegionStateProvince": ["9c1a239b35bd4598856e5393b249b8a1"]  # Florida
-        },
+        "appliedFacets": {"locationRegionStateProvince": ["9c1a239b35bd4598856e5393b249b8a1"]},
         "searchText": ""
     }
-
     try:
         r = requests.post(WORKDAY_API, headers=HEADERS, json=payload, timeout=10)
         r.raise_for_status()
@@ -37,9 +37,7 @@ def get_jobs():
             continue  # Skip non-Orlando jobs
 
         external_path = job.get("externalPath", "")
-        # Extract the job ID from the external path
         job_id = external_path.split("/")[-1]
-        # Construct the correct public URL
         link = f"https://fourseasons.wd3.myworkdayjobs.com/en-US/search/job/{job_id}?locationRegionStateProvince=9c1a239b35bd4598856e5393b249b8a1"
 
         jobs.append({
@@ -58,9 +56,8 @@ def send_ntfy(job):
     except Exception as e:
         print(f"❌ Failed to send notification: {e}")
 
-def main():
+def job_alert_loop():
     global seen_jobs
-    print("🚀 Starting Four Seasons Orlando Job Alert...")
     while True:
         try:
             jobs = get_jobs()
@@ -74,6 +71,14 @@ def main():
             print(f"⚠️ Unexpected error: {e}")
             time.sleep(CHECK_INTERVAL)
 
-if __name__ == "__main__":
-    main()
+# Start the job alert loop in a separate thread
+threading.Thread(target=job_alert_loop, daemon=True).start()
 
+# Minimal HTTP endpoint for UptimeRobot
+@app.route("/ping")
+def ping():
+    return "OK", 200
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
