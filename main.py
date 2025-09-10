@@ -74,6 +74,18 @@ def job_alert_loop():
 # Start the job alert loop in a separate thread
 threading.Thread(target=job_alert_loop, daemon=True).start()
 
+# Send a test notification on startup
+def send_startup_test():
+    test_job = {
+        "id": "TEST123",
+        "title": "Test Orlando Job",
+        "location": "Orlando",
+        "link": "https://fourseasons.wd3.myworkdayjobs.com/en-US/search/job/TEST123?locationRegionStateProvince=9c1a239b35bd4598856e5393b249b8a1"
+    }
+    send_ntfy(test_job)
+
+send_startup_test()
+
 # Minimal HTTP endpoint for UptimeRobot
 @app.route("/ping")
 def ping():
