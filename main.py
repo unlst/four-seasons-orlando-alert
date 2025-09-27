@@ -40,13 +40,12 @@ def get_jobs():
         job_title = job.get("title")
         job_location = job.get("locationsText", "Unknown")
 
-        # ✅ Filter only Orlando jobs
+        # ✅ Only include Orlando jobs
         if "Orlando" not in job_location:
             continue
 
-        job_link = (
-            f"https://fourseasons.wd3.myworkdayjobs.com/en-US/fourseasons{job_id}"
-        )
+        job_link = f"https://fourseasons.wd3.myworkdayjobs.com/en-US/fourseasons{job_id}"
+
         jobs.append({
             "id": job_id,
             "title": job_title,
@@ -82,7 +81,14 @@ def check():
             seen_jobs.add(job["id"])
             new_jobs.append(job)
 
+    # ✅ Properly closed dictionary
     return jsonify({
         "status": "ok",
         "new_jobs_found": len(new_jobs),
-        "total_jobs": le_
+        "total_jobs": len(jobs)
+    })
+
+if __name__ == "__main__":
+    # Send test notification on startup
+    send_ntfy("🚀 Orlando Job Alert Service started and running on Render!")
+    app.run(host="0.0.0.0", port=10000)
