@@ -8,10 +8,12 @@ app = Flask(__name__)
 
 # === CONFIG ===
 CHECK_INTERVAL = 600  # 10 minutes
-NTFY_TOPIC = "fs-orlando-jobs"
-seen_jobs = set()
+FLORIDA_TOPIC = "fs-florida-jobs"
+ORLANDO_TOPIC = "fs-orlando-jobs"
 
-# Orlando Region ID for Workday (Florida -> Orlando subset)
+seen_florida_jobs = set()
+seen_orlando_jobs = set()
+
 WORKDAY_API = "https://fourseasons.wd3.myworkdayjobs.com/wday/cxs/fourseasons/Search/jobs"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -20,11 +22,14 @@ HEADERS = {
 }
 
 # === JOB FETCHER ===
-def get_jobs():
-    # Orlando filter (Four Seasons Orlando)
+def fetch_jobs(search_text=""):
     payload = {
-        "appliedFacets": {"location": ["da6f2ff5d8a01013c48b0cf4c2005b02"]},  # Orlando’s Workday ID
-        "searchText": ""
+        "appliedFacets": {
+            "locationHierarchy1": ["9c1a239b35bd4598856e5393b249b8a1"]  # Florida
+        },
+        "limit": 50,
+        "offset": 0,
+        "searchText": search_text
     }
 
     try:
@@ -32,82 +37,68 @@ def get_jobs():
         r.raise_for_status()
         data = r.json()
     except Exception as e:
-        print(f"⚠️ Error fetching jobs: {e}")
+        print(f"❌ Error fetching jobs: {e}")
         return []
 
     jobs = []
     for job in data.get("jobPostings", []):
         external_path = job.get("externalPath", "")
         job_id = external_path.split("/")[-1]
-        title = job.get("title", "Unknown")
-        location = job.get("locationsText", "Unknown")
-
-        link = (
-            f"https://fourseasons.wd3.myworkdayjobs.com/en-US/search/job/"
-            f"{job_id}?location=da6f2ff5d8a01013c48b0cf4c2005b02"
-        )
+        link = f"https://fourseasons.wd3.myworkdayjobs.com/en-US/search/job/{job_id}?locationRegionStateProvince=9c1a239b35bd4598856e5393b249b8a1"
 
         jobs.append({
             "id": job.get("bulletFields", [external_path])[0],
-            "title": title,
-            "location": location,
+            "title": job.get("title", "Unknown"),
+            "location": job.get("locationsText", "Unknown"),
             "link": link
         })
-
-    print(f"✅ Found {len(jobs)} Orlando job(s)")
     return jobs
 
-# === NOTIFICATION ===
-def send_ntfy(job):
-    message = f"📢 New Orlando job posted:\n{job['title']} in {job['location']}\n{job['link']}"
+# === NTFY NOTIFICATION ===
+def send_ntfy(job, topic):
+    message = f"📢 New job posted:\n{job['title']} in {job['location']}\n{job['link']}"
     try:
-        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=message.encode("utf-8"), timeout=5)
-        print(f"✅ Sent: {job['title']}")
+        requests.post(f"https://ntfy.sh/{topic}", data=message.encode("utf-8"), timeout=5)
+        print(f"✅ Sent to {topic}: {job['title']}")
     except Exception as e:
         print(f"❌ Failed to send notification: {e}")
 
-# === JOB LOOP ===
-def job_alert_loop():
-    global seen_jobs
+# === JOB MONITOR LOOP ===
+def job_loop(topic, seen_jobs, city_filter=None):
     while True:
         try:
-            jobs = get_jobs()
+            jobs = fetch_jobs()
+            if city_filter:
+                jobs = [j for j in jobs if city_filter in j["location"]]
+
             for job in jobs:
                 if job["id"] not in seen_jobs:
-                    print(f"🔎 New job found: {job['title']} ({job['location']})")
-                    send_ntfy(job)
+                    send_ntfy(job, topic)
                     seen_jobs.add(job["id"])
+
             time.sleep(CHECK_INTERVAL)
         except Exception as e:
-            print(f"⚠️ Unexpected error: {e}")
+            print(f"⚠️ Unexpected error in {topic} loop: {e}")
             time.sleep(CHECK_INTERVAL)
 
-# === STARTUP TEST ===
-def send_startup_test():
-    test_job = {
-        "id": "TEST_ORLANDO",
-        "title": "Test Orlando Job",
-        "location": "Orlando",
-        "link": "https://fourseasons.wd3.myworkdayjobs.com/en-US/search/job/TEST_ORLANDO"
-    }
-    send_ntfy(test_job)
+# === START BACKGROUND THREADS ===
+threading.Thread(target=job_loop, args=(FLORIDA_TOPIC, seen_florida_jobs, None), daemon=True).start()
+threading.Thread(target=job_loop, args=(ORLANDO_TOPIC, seen_orlando_jobs, "Orlando"), daemon=True).start()
 
-# === FLASK ROUTES ===
-@app.route("/")
-def home():
-    """Default route for Render health checks."""
-    return "✅ Orlando Job Monitor is running", 200
+# === STARTUP TEST NOTIFICATIONS ===
+def send_startup_tests():
+    send_ntfy({"id": "TEST_FL", "title": "Test Florida Job", "location": "Florida", "link": "https://fourseasons.wd3.myworkdayjobs.com/en-US/search/job/TEST_FL"}, FLORIDA_TOPIC)
+    send_ntfy({"id": "TEST_ORL", "title": "Test Orlando Job", "location": "Orlando", "link": "https://fourseasons.wd3.myworkdayjobs.com/en-US/search/job/TEST_ORL"}, ORLANDO_TOPIC)
 
+send_startup_tests()
+
+# === KEEP-ALIVE ENDPOINT ===
 @app.route("/ping")
 def ping():
-    """UptimeRobot endpoint."""
-    return jsonify({"status": "alive", "service": "orlando-jobs"}), 200
+    return jsonify({"status": "ok", "message": "Florida & Orlando job monitor running ✅"}), 200
 
-# === STARTUP ===
+# === RUN FLASK ===
 if __name__ == "__main__":
-    print("🚀 Orlando job monitor started...")
-    send_startup_test()
-    threading.Thread(target=job_alert_loop, daemon=True).start()
-
     port = int(os.environ.get("PORT", 10000))
+    print("🚀 Florida & Orlando job monitor started...")
     app.run(host="0.0.0.0", port=port)
